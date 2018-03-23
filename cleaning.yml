@@ -1,0 +1,52 @@
+---
+
+- hosts: node
+  remote_user: automation
+  vars:
+    openshift_master_url: https://<HOST>:8443
+    openshift_login_insecure_flag: --insecure-skip-tls-verify=true
+    openshift_login_insecure: False
+    openshift_prune_builds_complete: 3
+    openshift_prune_builds_failed: 1
+    openshift_prune_builds_keep_younger: 120h0m0s
+    openshift_prune_deployments_complete: 3
+    openshift_prune_deployments_failed: 1
+    openshift_prune_deployments_keep_younger: 120h0m0s
+    openshift_prune_images_tag_revisions: 2
+    openshift_prune_images_keep_younger: 120h0m0s
+    openshift_token: <TOKEN_HERE>
+  tasks:
+    - name: Validate OpenShift Token Provided
+      fail: msg="OpenShift Token Not Provided"
+      failed_when: openshift_token is not defined
+    - name: Set Facts
+      set_fact: kubeconfig="/tmp/openshift-management-{{ ansible_date_time.epoch }}/config"
+      changed_when: True
+      notify: cleanup
+    - name: Create Directory
+      file: path="{{ kubeconfig | dirname }}" state=directory
+    - name: Login to OpenShift
+      shell: oc login --token={{ openshift_token }} {{ openshift_login_insecure_flag }} {{ openshift_master_url }}
+      environment:
+        KUBECONFIG: "{{ kubeconfig }}"
+    - name: Prune Builds
+      shell: oc adm prune builds --keep-complete={{ openshift_prune_builds_complete }}  --keep-failed={{ openshift_prune_builds_failed }} --keep-younger-than={{ openshift_prune_builds_keep_younger }} --orphans --confirm
+      environment:
+        KUBECONFIG: "{{ kubeconfig }}"
+      when: "{{ openshift_prune_builds | default(False) }}"
+    - name: Prune Deployments
+      shell: oc adm prune deployments --keep-complete={{ openshift_prune_deployments_complete }}  --keep-failed={{ openshift_prune_deployments_failed }} --keep-younger-than={{ openshift_prune_deployments_keep_younger }} --orphans --confirm
+      environment:
+        KUBECONFIG: "{{ kubeconfig }}"
+      when: "{{ openshift_prune_deployments | default(False) }}"
+    - name: Prune Images
+      shell: oc adm prune images --keep-tag-revisions={{ openshift_prune_images_tag_revisions }}  --keep-younger-than={{ openshift_prune_images_keep_younger }} --confirm
+      environment:
+        KUBECONFIG: "{{ kubeconfig }}"
+      when: "{{ openshift_prune_images | default(False) }}"
+    - name: Prun Volume
+      shell: docker volume ls -qf dangling=true | xargs --no-run-if-empty docker volume rm
+      become: true
+  handlers:
+    - name: cleanup
+      file: path="{{ kubeconfig | dirname }}" state=absent
